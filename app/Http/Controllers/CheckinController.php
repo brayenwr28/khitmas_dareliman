@@ -70,10 +70,36 @@ class CheckinController extends Controller
             $pendaftaran = Pendaftaran::where('siswa_id', $kode)->first();
         }
 
+        // Jika masih tidak ditemukan, coba cari dengan nama (LIKE)
+        if (!$pendaftaran) {
+            $hasilNama = Pendaftaran::where('nama_lengkap', 'LIKE', '%' . $kode . '%')->get();
+            
+            if ($hasilNama->count() === 1) {
+                $pendaftaran = $hasilNama->first();
+            } elseif ($hasilNama->count() > 1) {
+                // Kembalikan daftar pilihan supaya admin bisa memilih
+                $pilihan = $hasilNama->map(function($p) {
+                    return [
+                        'id' => $p->id,
+                        'kode_registrasi' => $p->kode_registrasi,
+                        'nama' => $p->nama_lengkap,
+                        'jadwal' => ($p->jadwal_hari ?: '-') . ' - ' . ($p->jadwal_jam ?: '-'),
+                        'status' => $p->status_kehadiran,
+                    ];
+                });
+                return response()->json([
+                    'success' => false,
+                    'multiple_results' => true,
+                    'message' => 'Ditemukan ' . $hasilNama->count() . ' peserta dengan nama tersebut. Silakan pilih:',
+                    'data' => $pilihan
+                ]);
+            }
+        }
+
         if (!$pendaftaran) {
             return response()->json([
                 'success' => false, 
-                'message' => 'Kode registrasi atau ID Siswa tidak ditemukan di sistem.'
+                'message' => 'Data tidak ditemukan. Coba dengan kode registrasi, ID siswa, atau nama lengkap.'
             ]);
         }
 

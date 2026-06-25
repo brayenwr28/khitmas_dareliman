@@ -27,7 +27,7 @@
             <h3 style="margin-top: 0; font-size: 1rem;">Gunakan Barcode Scanner Laser:</h3>
             <form id="scanForm" onsubmit="handleManualScan(event)">
                 <div style="display: flex; gap: 0.5rem;">
-                    <input type="text" id="manualInput" class="form-input" placeholder="Scan barcode atau ketik ID Siswa..." autofocus autocomplete="off" style="font-family: monospace; font-size: 1.25rem; font-weight: bold;">
+                    <input type="text" id="manualInput" class="form-input" placeholder="Scan barcode / ketik ID / ketik nama..." autofocus autocomplete="off" style="font-family: monospace; font-size: 1.25rem; font-weight: bold;">
                     <button type="submit" class="btn-primary" style="white-space: nowrap;">Proses</button>
                 </div>
             </form>
@@ -69,21 +69,103 @@
 <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
 <script>
     let isProcessing = false;
-    let html5QrcodeScanner = null;
+    let html5QrcodeInstance = null;
+    let currentCameraIndex = 0;
+    let availableCameras = [];
 
-    // Fungsi tambahan untuk tombol Switch Kamera
-    function switchCamera() {
-        const selectBox = document.getElementById('html5-qrcode-select-camera');
-        if (selectBox && selectBox.options.length > 1) {
-            let currentIndex = selectBox.selectedIndex;
-            let nextIndex = (currentIndex + 1) % selectBox.options.length;
-            selectBox.selectedIndex = nextIndex;
-            selectBox.dispatchEvent(new Event('change'));
-        } else {
+    // Switch camera
+    async function switchCamera() {
+        if (availableCameras.length <= 1) {
             Swal.fire({
                 icon: 'info',
                 title: 'Info',
                 text: 'Hanya ada 1 kamera yang terdeteksi di perangkat ini.'
+            });
+            return;
+        }
+
+        if (html5QrcodeInstance && html5QrcodeInstance.isScanning) {
+            await html5QrcodeInstance.stop();
+        }
+
+        currentCameraIndex = (currentCameraIndex + 1) % availableCameras.length;
+        startWithCameraId(availableCameras[currentCameraIndex].id);
+    }
+
+    function startWithCameraId(cameraId) {
+        html5QrcodeInstance.start(
+            cameraId,
+            {
+                fps: 10,
+                qrbox: { width: 250, height: 250 },
+                aspectRatio: 1.0
+            },
+            onScanSuccess,
+            onScanFailure
+        ).catch(err => {
+            console.error('Gagal memulai kamera:', err);
+            Swal.fire({
+                icon: 'error',
+                title: 'Gagal Membuka Kamera',
+                text: 'Pastikan Anda mengizinkan akses kamera pada browser.'
+            });
+        });
+    }
+
+    async function startCamera() {
+        document.getElementById('cameraOverlay').style.display = 'none';
+
+        html5QrcodeInstance = new Html5Qrcode("reader");
+
+        try {
+            availableCameras = await Html5Qrcode.getCameras();
+
+            if (!availableCameras || availableCameras.length === 0) {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Kamera Tidak Ditemukan',
+                    text: 'Tidak ada kamera yang terdeteksi di perangkat ini.'
+                });
+                return;
+            }
+
+            // Cari kamera belakang (back/environment)
+            let backCameraIndex = availableCameras.findIndex(camera =>
+                camera.label.toLowerCase().includes('back') ||
+                camera.label.toLowerCase().includes('belakang') ||
+                camera.label.toLowerCase().includes('rear') ||
+                camera.label.toLowerCase().includes('environment')
+            );
+
+            // Jika tidak ada label yang cocok dan ada lebih dari 1 kamera, pilih kamera terakhir (biasanya belakang)
+            if (backCameraIndex === -1 && availableCameras.length > 1) {
+                backCameraIndex = availableCameras.length - 1;
+            } else if (backCameraIndex === -1) {
+                backCameraIndex = 0;
+            }
+
+            currentCameraIndex = backCameraIndex;
+            startWithCameraId(availableCameras[currentCameraIndex].id);
+
+        } catch (err) {
+            console.error('Error getting cameras:', err);
+            // Fallback: langsung pakai facingMode environment
+            html5QrcodeInstance.start(
+                { facingMode: "environment" },
+                {
+                    fps: 10,
+                    qrbox: { width: 250, height: 250 },
+                    aspectRatio: 1.0
+                },
+                onScanSuccess,
+                onScanFailure
+            ).catch(e => {
+                console.error('Fallback camera juga gagal:', e);
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Gagal Membuka Kamera',
+                    text: 'Pastikan Anda mengizinkan akses kamera pada browser.'
+                });
             });
         }
     }
@@ -98,8 +180,8 @@
         if (!kode) return;
 
         // Pause camera scanner if running
-        if (html5QrcodeScanner) {
-            try { html5QrcodeScanner.pause(); } catch(e) {}
+        if (html5QrcodeInstance && html5QrcodeInstance.isScanning) {
+            try { await html5QrcodeInstance.pause(true); } catch(e) {}
         }
 
         document.getElementById('manualInput').disabled = true;
@@ -135,6 +217,52 @@
 
                 if (confirmResult.isConfirmed) {
                     await performCheckin(kode, true);
+                    return;
+                } else {
+                    resumeScanner();
+                    return;
+                }
+            }
+
+            // Handle multiple results (pencarian nama)
+            if (data.multiple_results) {
+                let listHtml = '<div style="text-align:left; max-height:300px; overflow-y:auto;">';
+                data.data.forEach((p, i) => {
+                    const statusBadge = p.status === 'hadir' 
+                        ? '<span style="color:#059669;font-weight:bold;">✅ Sudah Hadir</span>' 
+                        : '<span style="color:#dc2626;">Belum Hadir</span>';
+                    listHtml += `
+                        <label style="display:flex; align-items:flex-start; gap:0.75rem; padding:0.75rem; margin-bottom:0.5rem; border:1px solid #e5e7eb; border-radius:8px; cursor:pointer; transition:background 0.2s;" onmouseover="this.style.background='#f0f7fc'" onmouseout="this.style.background='white'">
+                            <input type="radio" name="pilihPeserta" value="${p.kode_registrasi}" style="margin-top:4px;" ${i===0 ? 'checked' : ''}>
+                            <div>
+                                <div style="font-weight:bold; font-size:1rem;">${p.nama}</div>
+                                <div style="font-size:0.85rem; color:#6b7280;">📅 ${p.jadwal} · ${statusBadge}</div>
+                            </div>
+                        </label>`;
+                });
+                listHtml += '</div>';
+
+                const pilihResult = await Swal.fire({
+                    title: '🔍 Ditemukan ' + data.data.length + ' Peserta',
+                    html: listHtml,
+                    icon: 'question',
+                    showCancelButton: true,
+                    confirmButtonText: 'Pilih & Check-In',
+                    cancelButtonText: 'Batal',
+                    confirmButtonColor: 'var(--success)',
+                    cancelButtonColor: 'var(--danger)',
+                    preConfirm: () => {
+                        const selected = document.querySelector('input[name="pilihPeserta"]:checked');
+                        if (!selected) {
+                            Swal.showValidationMessage('Pilih salah satu peserta');
+                            return false;
+                        }
+                        return selected.value;
+                    }
+                });
+
+                if (pilihResult.isConfirmed && pilihResult.value) {
+                    await performCheckin(pilihResult.value);
                     return;
                 } else {
                     resumeScanner();
@@ -194,8 +322,8 @@
         input.disabled = false;
         input.focus();
 
-        if (html5QrcodeScanner) {
-            try { html5QrcodeScanner.resume(); } catch(e) {}
+        if (html5QrcodeInstance && html5QrcodeInstance.getState() === Html5QrcodeScannerState.PAUSED) {
+            try { html5QrcodeInstance.resume(); } catch(e) {}
         }
         isProcessing = false;
     }
@@ -209,34 +337,14 @@
         }
     }
 
-    function startCamera() {
-        document.getElementById('cameraOverlay').style.display = 'none';
-        html5QrcodeScanner = new Html5QrcodeScanner(
-            "reader", { 
-                fps: 5, 
-                qrbox: { width: 300, height: 300 }, 
-                rememberLastUsedCamera: true,
-                formatsToSupport: [ Html5QrcodeSupportedFormats.QR_CODE ],
-                videoConstraints: {
-                    width: { min: 640, ideal: 1280 },
-                    height: { min: 480, ideal: 720 }
-                }
-            }, false
-        );
-        html5QrcodeScanner.render(onScanSuccess, onScanFailure);
-    }
-
     function onScanSuccess(decodedText, decodedResult) {
-        // Prevent multiple rapid fires
         if (!isProcessing) {
-            // Optional: Pause scanning until processed? 
-            // html5QrcodeScanner.pause();
             sendScanData(decodedText);
         }
     }
 
     function onScanFailure(error) {
-        // handle scan failure, usually better to ignore and keep scanning
+        // Ignore scan failures, keep scanning
     }
     
     // Auto focus input on load
