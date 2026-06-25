@@ -27,7 +27,7 @@
             <h3 style="margin-top: 0; font-size: 1rem;">Gunakan Barcode Scanner Laser:</h3>
             <form id="scanForm" onsubmit="handleManualScan(event)">
                 <div style="display: flex; gap: 0.5rem;">
-                    <input type="text" id="manualInput" class="form-input" placeholder="Arahkan kursor ke sini lalu tembak barcode..." autofocus autocomplete="off" style="font-family: monospace; font-size: 1.25rem; font-weight: bold;">
+                    <input type="text" id="manualInput" class="form-input" placeholder="Scan barcode atau ketik ID Siswa..." autofocus autocomplete="off" style="font-family: monospace; font-size: 1.25rem; font-weight: bold;">
                     <button type="submit" class="btn-primary" style="white-space: nowrap;">Proses</button>
                 </div>
             </form>
@@ -95,34 +95,19 @@
     }
 
     async function submitKode(kode) {
-        const input = document.getElementById('manualInput');
-        const submitBtn = document.getElementById('submitBtn');
-        const statusBox = document.getElementById('statusBox');
-
         if (!kode) return;
 
-        isScanning = false;
-        if (html5QrCode && html5QrCode.isScanning) {
-            try {
-                await html5QrCode.pause();
-            } catch (e) {
-                console.log('Error pausing scanner:', e);
-            }
+        // Pause camera scanner if running
+        if (html5QrcodeScanner) {
+            try { html5QrcodeScanner.pause(); } catch(e) {}
         }
 
-        input.disabled = true;
-        submitBtn.disabled = true;
-        submitBtn.innerHTML = '<span class="loading"></span> Memproses...';
-        statusBox.innerHTML = '<div style="color: var(--warning);">⏳ Memproses data...</div>';
+        document.getElementById('manualInput').disabled = true;
 
         await performCheckin(kode);
     }
 
     async function performCheckin(kode, confirmOverride = false) {
-        const input = document.getElementById('manualInput');
-        const submitBtn = document.getElementById('submitBtn');
-        const statusBox = document.getElementById('statusBox');
-
         try {
             const response = await fetch('{{ route("scanner.process") }}', {
                 method: 'POST',
@@ -152,7 +137,6 @@
                     await performCheckin(kode, true);
                     return;
                 } else {
-                    statusBox.innerHTML = '<div style="color: var(--text-muted);">Check-in dibatalkan karena tidak sesuai jadwal.</div>';
                     resumeScanner();
                     return;
                 }
@@ -191,8 +175,6 @@
                 }
             }
 
-            statusBox.innerHTML = '<div style="color: var(--success);">Menunggu scan berikutnya...</div>';
-
         } catch (error) {
             console.error('Error:', error);
             await Swal.fire({
@@ -202,7 +184,6 @@
                 confirmButtonText: 'OK',
                 confirmButtonColor: 'var(--primary)'
             });
-            statusBox.innerHTML = '<div style="color: var(--danger);">Gagal memproses data.</div>';
         } finally {
             resumeScanner();
         }
@@ -210,20 +191,12 @@
 
     function resumeScanner() {
         const input = document.getElementById('manualInput');
-        const submitBtn = document.getElementById('submitBtn');
         input.disabled = false;
-        submitBtn.disabled = false;
-        submitBtn.innerHTML = 'Proses';
         input.focus();
 
-        if (html5QrCode && html5QrCode.isPaused()) {
-            try {
-                html5QrCode.resume();
-            } catch (e) {
-                console.log('Error resuming scanner:', e);
-            }
+        if (html5QrcodeScanner) {
+            try { html5QrcodeScanner.resume(); } catch(e) {}
         }
-        isScanning = true;
         isProcessing = false;
     }
 

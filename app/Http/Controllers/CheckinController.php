@@ -65,10 +65,15 @@ class CheckinController extends Controller
 
         $pendaftaran = Pendaftaran::where('kode_registrasi', $kode)->first();
 
+        // Jika tidak ditemukan dengan kode_registrasi, coba cari dengan siswa_id
+        if (!$pendaftaran) {
+            $pendaftaran = Pendaftaran::where('siswa_id', $kode)->first();
+        }
+
         if (!$pendaftaran) {
             return response()->json([
                 'success' => false, 
-                'message' => 'Kode tidak valid atau tidak terdaftar di sistem.'
+                'message' => 'Kode registrasi atau ID Siswa tidak ditemukan di sistem.'
             ]);
         }
 
